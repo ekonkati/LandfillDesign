@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Landfill Design Calculator with 3D Visualization</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet.js for interactive maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- Leaflet Draw plugin for drawing polygons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+
+    <!-- Turf.js for geospatial analysis -->
+    <script src='https://unpkg.com/@turf/turf@6/turf.min.js'></script>
+
+    <!-- Three.js for 3D modeling -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #map { height: 400px; border-radius: 0.5rem; z-index: 0; }
+        .leaflet-container { background: #f9fafb; }
+        .btn-disabled { background-color: #9ca3af; cursor: not-allowed; }
+        .loader {
+            border: 4px solid #f3f3f3; border-radius: 50%; border-top: 4px solid #4f46e5;
+            width: 40px; height: 40px; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .modal { z-index: 1000; }
+        .modal-content { max-height: 80vh; }
+        #cross-section-canvas, #three-d-canvas { width: 100%; height: 300px; background-color: #f3f4f6; border-radius: 0.5rem; cursor: grab; }
+        #three-d-canvas:active { cursor: grabbing; }
+        .tab { cursor: pointer; padding: 0.5rem 1rem; border-bottom: 2px solid transparent; transition: all 0.2s ease-in-out; }
+        .tab.active { border-color: #4f46e5; color: #4f46e5; font-weight: 600; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Advanced Landfill Design Calculator</h1>
+            <p class="mt-2 text-lg text-gray-600">Design, calculate, and visualize your landfill in 2D and 3D.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- Left Panel: Inputs and Map -->
+            <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-md">
+                <!-- Step 1: Map -->
+                <div>
+                    <h2 class="text-xl font-bold mb-2 text-gray-800">Step 1: Define Landfill Footprint on Satellite Map</h2>
+                    <p class="text-gray-600 mb-4">Use the polygon tool on the map's left to draw the base area.</p>
+                    <div id="map"></div>
+                </div>
+
+                <!-- Step 2: Design Parameters -->
+                <div class="mt-8">
+                    <h2 class="text-xl font-bold mb-4 text-gray-800">Step 2: Enter Design Parameters</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="waste-height" class="block text-sm font-medium text-gray-700">Total Waste Height (m)</label>
+                            <input type="number" id="waste-height" value="25" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                        </div>
+                        <div>
+                            <label for="side-slope" class="block text-sm font-medium text-gray-700">Side Slope Ratio (H:1V)</label>
+                            <input type="number" id="side-slope" value="3" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                        </div>
+                        <div>
+                            <label for="waste-density" class="block text-sm font-medium text-gray-700">Compacted Waste Density (t/m³)</label>
+                            <input type="number" id="waste-density" value="0.85" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                        </div>
+                        <div>
+                            <label for="annual-waste" class="block text-sm font-medium text-gray-700">Annual Waste Input (tonnes/year)</label>
+                            <input type="number" id="annual-waste" value="50000" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Action Button -->
+                <div class="mt-8 text-center">
+                    <button id="calculate-btn" class="w-full md:w-auto bg-indigo-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-indigo-700 transition duration-300 shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 btn-disabled" disabled>
+                        Calculate & Visualize
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Panel: Results & Visualizations -->
+            <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-md flex flex-col">
+                <div class="flex border-b mb-4">
+                    <div id="tab-results" class="tab active">Results</div>
+                    <div id="tab-cross-section" class="tab">2D Section</div>
+                    <div id="tab-3d" class="tab">3D Model</div>
+                </div>
+
+                <div id="content-results" class="tab-content">
+                    <div id="results-placeholder" class="text-center text-gray-500 py-16 border-2 border-dashed rounded-lg flex-grow flex flex-col justify-center">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V7a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        <p class="mt-4">Results will be displayed here.</p>
+                    </div>
+                    <div id="results-output" class="hidden space-y-5"></div>
+                    <div id="ai-feature-section" class="hidden mt-6 pt-6 border-t border-gray-200">
+                        <h3 class="text-lg font-bold text-gray-800 mb-3">AI-Powered Analysis</h3>
+                        <button id="generate-brief-btn" class="w-full bg-teal-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-teal-600 transition duration-300 shadow-lg flex items-center justify-center gap-2">
+                            <span class="text-lg">✨</span> Generate Environmental Brief
+                        </button>
+                    </div>
+                </div>
+
+                <div id="content-cross-section" class="tab-content hidden">
+                    <canvas id="cross-section-canvas"></canvas>
+                    <p class="text-xs text-center text-gray-500 mt-2">Illustrative cross-section. Not to scale.</p>
+                </div>
+
+                <div id="content-3d" class="tab-content hidden">
+                    <div id="three-d-container" class="relative">
+                        <canvas id="three-d-canvas"></canvas>
+                        <div id="3d-loader" class="absolute inset-0 bg-gray-200 bg-opacity-75 flex items-center justify-center hidden"><div class="loader"></div></div>
+                    </div>
+                     <p class="text-xs text-center text-gray-500 mt-2">Drag to rotate, scroll to zoom, right-click to pan.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Error Modal -->
+    <div id="error-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden modal">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="mt-3 text-center">
+                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100"><svg class="h-6 w-6 text-red-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div>
+                <h3 class="text-lg leading-6 font-medium text-gray-900 mt-2">Error</h3>
+                <div class="mt-2 px-7 py-3"><p id="error-message" class="text-sm text-gray-500"></p></div>
+                <div class="items-center px-4 py-3"><button id="close-error-modal-btn" class="px-4 py-2 bg-red-500 text-white text-base font-medium rounded-md w-full shadow-sm hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-300">Close</button></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Report Modal -->
+    <div id="report-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden modal">
+        <div class="relative top-10 mx-auto p-5 border w-full max-w-3xl shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center border-b pb-3 mb-3">
+                <h3 class="text-xl leading-6 font-bold text-gray-900">✨ Preliminary Environmental Brief</h3>
+                <button id="close-report-modal-btn" class="text-gray-400 hover:text-gray-600 text-2xl font-bold">&times;</button>
+            </div>
+            <div id="report-loader" class="flex flex-col items-center justify-center py-20">
+                <div class="loader"></div>
+                <p class="mt-4 text-gray-600">Generating report with Gemini AI...</p>
+            </div>
+            <div id="report-content" class="hidden overflow-y-auto modal-content p-2 bg-gray-50 rounded">
+                <!-- AI-generated content will be injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Global Variables ---
+        let drawnPolygon = null;
+        let lastCalculationData = null;
+        let threeD = { scene: null, camera: null, renderer: null, controls: null, model: null, animationId: null };
+
+        // DOM Elements
+        const calculateBtn = document.getElementById('calculate-btn');
+        const resultsPlaceholder = document.getElementById('results-placeholder');
+        const resultsOutput = document.getElementById('results-output');
+        const aiFeatureSection = document.getElementById('ai-feature-section');
+        const generateBriefBtn = document.getElementById('generate-brief-btn');
+        const crossSectionCanvas = document.getElementById('cross-section-canvas');
+        const threeDCanvas = document.getElementById('three-d-canvas');
+        const threeDLoader = document.getElementById('3d-loader');
+        
+        // Modal Elements
+        const errorModal = document.getElementById('error-modal');
+        const errorMessage = document.getElementById('error-message');
+        const closeErrorModalBtn = document.getElementById('close-error-modal-btn');
+        const reportModal = document.getElementById('report-modal');
+        const reportLoader = document.getElementById('report-loader');
+        const reportContent = document.getElementById('report-content');
+        const closeReportModalBtn = document.getElementById('close-report-modal-btn');
+
+
+        // --- Map Initialization ---
+        const map = L.map('map').setView([20.5937, 78.9629], 5);
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+        }).addTo(map);
+
+        // --- Leaflet Draw ---
+        const drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+        const drawControl = new L.Control.Draw({
+            edit: { featureGroup: drawnItems },
+            draw: {
+                polygon: { shapeOptions: { color: '#fbbf24', weight: 3, opacity: 0.8 } },
+                polyline: false, rectangle: false, circle: false, marker: false, circlemarker: false
+            }
+        });
+        map.addControl(drawControl);
+
+        // --- Event Listeners ---
+        map.on(L.Draw.Event.CREATED, (event) => {
+            drawnItems.clearLayers();
+            drawnItems.addLayer(event.layer);
+            drawnPolygon = event.layer.toGeoJSON();
+            calculateBtn.disabled = false;
+            calculateBtn.classList.remove('btn-disabled');
+            calculateBtn.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
+            resetResults();
+        });
+
+        map.on(L.Draw.Event.EDITED, (event) => {
+            event.layers.eachLayer(layer => drawnPolygon = layer.toGeoJSON());
+            calculateBtn.disabled = false;
+            resetResults();
+        });
+
+        map.on(L.Draw.Event.DELETED, () => {
+            calculateBtn.disabled = true;
+            calculateBtn.classList.add('btn-disabled');
+            calculateBtn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+            drawnPolygon = null;
+            resetResults();
+        });
+
+        calculateBtn.addEventListener('click', () => {
+            if (!drawnPolygon) { showError('Please draw a polygon on the map first.'); return; }
+            
+            const inputs = {
+                wasteHeight: parseFloat(document.getElementById('waste-height').value),
+                sideSlope: parseFloat(document.getElementById('side-slope').value),
+                wasteDensity: parseFloat(document.getElementById('waste-density').value),
+                annualWaste: parseFloat(document.getElementById('annual-waste').value),
+                bundWidth: 4,
+                liftHeight: 5
+            };
+
+            if (Object.values(inputs).some(isNaN)) { showError('All input fields must be valid numbers.'); return; }
+            if (inputs.wasteHeight <= 0 || inputs.sideSlope <= 0 || inputs.wasteDensity <= 0 || inputs.annualWaste <= 0) {
+                showError('All input values must be greater than zero.'); return;
+            }
+
+            try {
+                let totalVolume = 0;
+                const liftGeometries = [];
+                let currentPolygon = drawnPolygon;
+                let currentHeight = 0;
+
+                while (currentHeight < inputs.wasteHeight) {
+                    const thisLiftHeight = Math.min(inputs.liftHeight, inputs.wasteHeight - currentHeight);
+                    const baseLiftPoly = currentPolygon;
+                    if (!baseLiftPoly || turf.area(baseLiftPoly) <= 0) break;
+                    const baseArea = turf.area(baseLiftPoly);
+                    
+                    const horizontalInset = thisLiftHeight / inputs.sideSlope;
+                    const topLiftPoly = turf.buffer(baseLiftPoly, -horizontalInset, { units: 'meters' });
+                    if (!topLiftPoly || turf.area(topLiftPoly) <= 0) { break; }
+                    const topArea = turf.area(topLiftPoly);
+
+                    const liftVolume = (thisLiftHeight / 3) * (baseArea + topArea + Math.sqrt(baseArea * topArea));
+                    totalVolume += liftVolume;
+
+                    liftGeometries.push({
+                        base: baseLiftPoly,
+                        top: topLiftPoly,
+                        height: thisLiftHeight,
+                        startHeight: currentHeight
+                    });
+
+                    currentHeight += thisLiftHeight;
+                    if (currentHeight >= inputs.wasteHeight) break;
+
+                    currentPolygon = turf.buffer(topLiftPoly, -inputs.bundWidth, { units: 'meters' });
+                }
+
+                if (liftGeometries.length === 0) {
+                    showError('Could not generate landfill lifts. The area may be too small for the specified height and slope.');
+                    return;
+                }
+
+                const totalCapacityTonnes = totalVolume * inputs.wasteDensity;
+                const lifespanYears = totalCapacityTonnes / inputs.annualWaste;
+
+                lastCalculationData = {
+                    totalVolume, totalCapacityTonnes, lifespanYears,
+                    baseArea: turf.area(drawnPolygon), ...inputs, liftGeometries
+                };
+
+                displayResults(lastCalculationData);
+                drawCrossSection(lastCalculationData);
+                draw3DModel(lastCalculationData);
+                
+                // Switch to results tab automatically
+                document.getElementById('tab-results').click();
+
+            } catch (error) {
+                console.error("Calculation Error:", error);
+                showError('An error occurred during calculation. The shape might be too complex or small for the given height/slope.');
+            }
+        });
+        
+        // --- Tab Switching Logic ---
+        const tabs = document.querySelectorAll('.tab');
+        const tabContents = document.querySelectorAll('.tab-content');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const targetId = 'content-' + tab.id.split('-')[1];
+                tabContents.forEach(content => {
+                    content.classList.add('hidden');
+                    if (content.id === targetId) {
+                        content.classList.remove('hidden');
+                    }
+                });
+            });
+        });
+        
+        // --- Modal & AI Listeners ---
+        closeErrorModalBtn.addEventListener('click', () => errorModal.classList.add('hidden'));
+        closeReportModalBtn.addEventListener('click', () => reportModal.classList.add('hidden'));
+        generateBriefBtn.addEventListener('click', () => { /* AI logic to be added here */ });
+
+
+        function resetResults() {
+            resultsPlaceholder.classList.remove('hidden');
+            resultsOutput.classList.add('hidden');
+            aiFeatureSection.classList.add('hidden');
+            const ctx = crossSectionCanvas.getContext('2d');
+            ctx.clearRect(0, 0, crossSectionCanvas.width, crossSectionCanvas.height);
+            if (threeD.model) {
+                threeD.scene.remove(threeD.model);
+                threeD.renderer.render(threeD.scene, threeD.camera);
+            }
+        }
+        
+        // --- Visualization Functions ---
+
+        function drawCrossSection(data) {
+            const canvas = crossSectionCanvas;
+            const ctx = canvas.getContext('2d');
+            const { width, height } = canvas;
+            ctx.clearRect(0, 0, width, height);
+            ctx.font = "10px Inter, sans-serif";
+            ctx.fillStyle = "#4b5563";
+            ctx.strokeStyle = "#6b7280";
+
+            const bbox = turf.bbox(data.liftGeometries[0].base);
+            const baseWidthMeters = turf.distance([bbox[0], bbox[1]], [bbox[2], bbox[1]], {units: 'meters'});
+            const totalHeightMeters = data.wasteHeight;
+            
+            const scaleX = width * 0.8 / baseWidthMeters;
+            const scaleY = height * 0.7 / totalHeightMeters;
+            const scale = Math.min(scaleX, scaleY);
+
+            const originX = width / 2;
+            const originY = height * 0.9;
+
+            ctx.beginPath();
+            ctx.moveTo(originX - (baseWidthMeters * scale / 2), originY);
+
+            let lastTopY = originY;
+            let lastTopWidth = baseWidthMeters * scale;
+
+            data.liftGeometries.forEach((lift, index) => {
+                const liftHeight = lift.height * scale;
+                const bboxTop = turf.bbox(lift.top);
+                const topWidthMeters = turf.distance([bboxTop[0], bboxTop[1]], [bboxTop[2], bboxTop[1]], {units: 'meters'});
+                const topWidth = topWidthMeters * scale;
+                
+                // Draw sloped lift
+                ctx.lineTo(originX - topWidth / 2, lastTopY - liftHeight);
+                ctx.lineTo(originX + topWidth / 2, lastTopY - liftHeight);
+                
+                lastTopY -= liftHeight;
+                
+                // Draw bund if not the last lift
+                if (index < data.liftGeometries.length - 1) {
+                    const nextLiftBaseBbox = turf.bbox(data.liftGeometries[index+1].base);
+                    const nextLiftBaseWidthMeters = turf.distance([nextLiftBaseBbox[0], nextLiftBaseBbox[1]], [nextLiftBaseBbox[2], nextLiftBaseBbox[1]], {units: 'meters'});
+                    const nextLiftBaseWidth = nextLiftBaseWidthMeters * scale;
+                    
+                    ctx.lineTo(originX + nextLiftBaseWidth / 2, lastTopY);
+                    ctx.lineTo(originX - nextLiftBaseWidth / 2, lastTopY);
+                }
+            });
+            
+            ctx.lineTo(originX - (baseWidthMeters * scale / 2), originY);
+            ctx.closePath();
+
+            ctx.fillStyle = '#a5b4fc';
+            ctx.fill();
+            ctx.strokeStyle = '#4338ca';
+            ctx.stroke();
+
+            // Draw annotations
+            ctx.beginPath();
+            ctx.moveTo(originX - (baseWidthMeters * scale / 2), originY + 5);
+            ctx.lineTo(originX + (baseWidthMeters * scale / 2), originY + 5);
+            ctx.stroke();
+            ctx.fillText(`${baseWidthMeters.toFixed(0)}m (approx base)`, originX - 40, originY + 18);
+
+            ctx.beginPath();
+            ctx.moveTo(originX + (baseWidthMeters * scale / 2) + 10, originY);
+            ctx.lineTo(originX + (baseWidthMeters * scale / 2) + 10, originY - totalHeightMeters * scale);
+            ctx.stroke();
+            ctx.fillText(`${totalHeightMeters}m`, originX + (baseWidthMeters * scale / 2) + 15, originY - totalHeightMeters*scale/2);
+        }
+
+        function init3D() {
+            if (threeD.animationId) cancelAnimationFrame(threeD.animationId);
+
+            const container = document.getElementById('three-d-container');
+            threeD.scene = new THREE.Scene();
+            threeD.scene.background = new THREE.Color(0xf3f4f6);
+
+            threeD.camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 10000);
+            threeD.camera.position.set(200, 200, 200);
+
+            if (!threeD.renderer) {
+                threeD.renderer = new THREE.WebGLRenderer({ canvas: threeDCanvas, antialias: true });
+            }
+            threeD.renderer.setSize(container.clientWidth, container.clientHeight);
+            
+            if (!threeD.controls) {
+                 threeD.controls = new THREE.OrbitControls(threeD.camera, threeD.renderer.domElement);
+            } else {
+                threeD.controls.object = threeD.camera;
+            }
+            threeD.controls.enableDamping = true;
+
+            threeD.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(100, 100, 50);
+            threeD.scene.add(directionalLight);
+
+            const animate = () => {
+                threeD.animationId = requestAnimationFrame(animate);
+                threeD.controls.update();
+                threeD.renderer.render(threeD.scene, threeD.camera);
+            };
+            animate();
+            
+            const onResize = () => {
+                threeD.camera.aspect = container.clientWidth / container.clientHeight;
+                threeD.camera.updateProjectionMatrix();
+                threeD.renderer.setSize(container.clientWidth, container.clientHeight);
+            };
+            window.removeEventListener('resize', onResize); // Avoid duplicates
+            window.addEventListener('resize', onResize);
+        }
+
+        function draw3DModel(data) {
+            threeDLoader.classList.remove('hidden');
+            init3D();
+            
+            if (threeD.model) {
+                threeD.scene.remove(threeD.model);
+            }
+
+            const landfillGroup = new THREE.Group();
+            const center = turf.centerOfMass(data.liftGeometries[0].base).geometry.coordinates;
+
+            const liftMaterial = new THREE.MeshLambertMaterial({ color: 0x6d28d9 });
+            const bundMaterial = new THREE.MeshLambertMaterial({ color: 0xa78bfa });
+
+            data.liftGeometries.forEach((lift, index) => {
+                // Create the sloped lift part as a simple prism (robust method)
+                const baseCoords = lift.base.geometry.coordinates[0].map(p => new THREE.Vector2(p[0] - center[0], p[1] - center[1]));
+                const baseShape = new THREE.Shape(baseCoords);
+                const extrudeSettings = { depth: lift.height, bevelEnabled: false };
+                const geometry = new THREE.ExtrudeGeometry(baseShape, extrudeSettings);
+                const liftMesh = new THREE.Mesh(geometry, liftMaterial);
+                liftMesh.position.y = lift.startHeight; // Y is up in Three.js default
+                landfillGroup.add(liftMesh);
+
+                // Create the bund on top of this lift
+                if (index < data.liftGeometries.length - 1) {
+                    const bundBaseCoords = data.liftGeometries[index+1].base.geometry.coordinates[0].map(p => new THREE.Vector2(p[0] - center[0], p[1] - center[1]));
+                    const bundTopCoords = lift.top.geometry.coordinates[0].map(p => new THREE.Vector2(p[0] - center[0], p[1] - center[1]));
+                    
+                    const bundTopShape = new THREE.Shape(bundTopCoords);
+                    const holeShape = new THREE.Path(bundBaseCoords);
+                    bundTopShape.holes.push(holeShape);
+                    
+                    const bundGeom = new THREE.ShapeGeometry(bundTopShape);
+                    const bundMesh = new THREE.Mesh(bundGeom, bundMaterial);
+                    bundMesh.position.y = lift.startHeight + lift.height;
+                    bundMesh.rotation.x = -Math.PI / 2;
+                    landfillGroup.add(bundMesh);
+                }
+            });
+            
+            const groundSize = Math.max(Math.sqrt(data.baseArea) * 1.5, 300);
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(groundSize, groundSize), new THREE.MeshLambertMaterial({ color: 0x9ca3af }));
+            ground.rotation.x = -Math.PI / 2;
+            landfillGroup.add(ground);
+
+            threeD.model = landfillGroup;
+            threeD.scene.add(landfillGroup);
+
+            const box = new THREE.Box3().setFromObject(landfillGroup);
+            const boxSize = box.getSize(new THREE.Vector3()).length();
+            const boxCenter = box.getCenter(new THREE.Vector3());
+            threeD.controls.target.copy(boxCenter);
+            threeD.camera.position.set(boxCenter.x + boxSize * 0.6, boxCenter.y + boxSize * 0.5, boxCenter.z + boxSize * 0.6);
+            threeD.controls.update();
+            
+            threeDLoader.classList.add('hidden');
+        }
+        
+        function displayResults(data) {
+            resultsPlaceholder.classList.add('hidden');
+            resultsOutput.classList.remove('hidden');
+            aiFeatureSection.classList.remove('hidden');
+
+            const createResultItem = (label, value, unit) => `
+                <div class="flex justify-between items-center py-2 border-b">
+                    <p class="text-sm font-medium text-gray-600">${label}</p>
+                    <p class="text-lg font-semibold text-gray-900">${value} <span class="text-sm font-normal text-gray-500">${unit}</span></p>
+                </div>`;
+            
+            resultsOutput.innerHTML = `
+                ${createResultItem('Base Footprint Area', data.baseArea.toLocaleString(undefined, {maximumFractionDigits: 0}), 'm²')}
+                ${createResultItem('Total Airspace Volume', data.totalVolume.toLocaleString(undefined, {maximumFractionDigits: 0}), 'm³')}
+                ${createResultItem('Total Waste Capacity', data.totalCapacityTonnes.toLocaleString(undefined, {maximumFractionDigits: 0}), 'tonnes')}
+                <div class="pt-2">
+                ${createResultItem('Estimated Lifespan', data.lifespanYears.toLocaleString(undefined, {maximumFractionDigits: 1}), 'years')}
+                </div>
+            `;
+        }
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorModal.classList.remove('hidden');
+        }
+        // AI functionality and modals would be added back here for a full implementation.
+        generateBriefBtn.addEventListener('click', async () => {
+            if (!lastCalculationData) {
+                showError("Please calculate the landfill parameters first.");
+                return;
+            }
+            
+            reportModal.classList.remove('hidden');
+            reportContent.classList.add('hidden');
+            reportLoader.classList.remove('hidden');
+
+            const centerPoint = turf.centerOfMass(drawnPolygon);
+            const [lon, lat] = centerPoint.geometry.coordinates;
+
+            const prompt = `
+                Act as an expert environmental consultant. I am planning a new landfill and need a preliminary environmental impact brief.
+
+                Here are the project details:
+                - Location (approx. coordinates): Latitude ${lat.toFixed(4)}, Longitude ${lon.toFixed(4)}
+                - Base Footprint Area: ${lastCalculationData.baseArea.toFixed(0)} square meters
+                - Total Waste Height: ${lastCalculationData.wasteHeight} meters
+                - Total Airspace Volume: ${lastCalculationData.totalVolume.toFixed(0)} cubic meters
+                - Total Waste Capacity: ${lastCalculationData.totalCapacityTonnes.toFixed(0)} tonnes
+                - Estimated Lifespan: ${lastCalculationData.lifespanYears.toFixed(1)} years
+
+                Based on these details, please provide a structured report using markdown formatting covering the following sections:
+                1.  **Executive Summary:** A brief overview of the project and key potential impacts.
+                2.  **Potential Impact on Water Resources:** Discuss risks to groundwater and surface water, including leachate contamination. Suggest primary mitigation measures (e.g., liner systems, leachate collection).
+                3.  **Potential Impact on Air Quality:** Discuss risks from landfill gas (methane, CO2), odors, and dust from operations. Suggest primary mitigation measures (e.g., gas collection systems, daily cover).
+                4.  **Potential Impact on Local Ecology:** Discuss risks to local flora and fauna due to habitat loss and contamination. Suggest mitigation measures.
+                5.  **Socio-Economic Considerations:** Briefly mention potential impacts like noise, traffic, and visual aesthetics on nearby communities.
+                6.  **Preliminary Recommendations:** Conclude with 3-4 high-level recommendations for the next steps in the environmental assessment process.
+
+                Format the output clearly with markdown headings for each section. Use markdown bullet points for lists of risks and mitigation measures.
+            `;
+
+            try {
+                let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+                const payload = { contents: chatHistory };
+                const apiKey = ""; 
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+                const result = await response.json();
+                
+                let text = 'No content generated.';
+                if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0]) {
+                    text = result.candidates[0].content.parts[0].text;
+                } else {
+                     throw new Error('Invalid response structure from API.');
+                }
+
+                reportContent.innerHTML = `<pre class="whitespace-pre-wrap text-sm text-gray-700 p-1">${text}</pre>`;
+            
+            } catch (err) {
+                console.error("Gemini API Error:", err);
+                reportContent.innerHTML = `<div class="text-red-600 text-center p-4"><p><strong>Failed to generate report.</strong></p><p class="text-sm mt-2">${err.message}</p></div>`;
+            } finally {
+                reportLoader.classList.add('hidden');
+                reportContent.classList.remove('hidden');
+            }
+        });
+
+    </script>
+</body>
+</html>
